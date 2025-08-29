@@ -169,7 +169,7 @@ int main(void)
 #else
     SYSCFG_DL_init();
 
-    DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_LED_GREEN_PIN | BAMBOO_GPIO_LED_RED_PIN);
+    DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_LED_GREEN_PIN | BAMBOO_GPIO_LED_RED_PIN);
 
     //DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_LED_GREEN_PIN | BAMBOO_GPIO_LED_RED_PIN |
     //                  BAMBOO_GPIO_CH_EN_PIN | BAMBOO_GPIO_BS_EN_PIN |
@@ -588,24 +588,6 @@ void update_battery_capacity(void){
 
     }
 #endif
-    /*
-    // Battery UVP
-    if(IS_BIT_CLR(g_u8SystemErrors, SYS_ERROR_BATTERY_UVP) && StateDebounce((Average_BAT_value < VBAT_UVP_0P999V), 3 ,&g_u8BatteryUVPCntr)){
-        SET_BIT(g_u8SystemErrors, SYS_ERROR_BATTERY_UVP);
-    } else if(IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_BATTERY_UVP) && StateDebounce((Average_BAT_value >= VBAT_UVP_RELEASE_1P195V), 3 ,&g_u8BatteryUVPReleaseCntr)){
-        CLR_BIT(g_u8SystemErrors, SYS_ERROR_BATTERY_UVP);
-    }        
-    
-    // Battery SVP
-    if(IS_BIT_CLR(g_u8SystemErrors, SYS_ERROR_SVP) && StateDebounce((Average_BAT_value < VBAT_SVP_0P799V), 10 ,&g_u8SVPCntr)){
-    //    if(PK_XD == 1){
-        SET_BIT(g_u8SystemErrors, SYS_ERROR_SVP);
-        // disable_charger();
-    //    }
-    } else if(IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_BATTERY_UVP) && StateDebounce((Average_BAT_value >= VBAT_SVP_0P799V), 3 ,&g_u8SVPReleaseCntr)){
-        CLR_BIT(g_u8SystemErrors, SYS_ERROR_SVP);
-    }  
-    */
     // Fast charge or not
     if(IS_BIT_SET(g_u8SystemFlags, FLAG_CHARGING)){
         if(StateDebounce((Average_BAT_value >= VBAT_SVP_0P300V_IN_FAST), 2 ,&g_u8FastChargeCntr) && IS_BIT_CLR(g_u8SystemState, SYS_STAT_FAST_CHARGE)){
@@ -870,15 +852,27 @@ void OneHundredMsHnadler(void){
     static char error_count = 0;
     static char first_chans = 0;
     static char charge_count[2] = {0};
+    static char test_vol_add = 0;
 #ifndef BAT_CHECK_IN_ORI
     static char bat_first_in = 0;
     static char count_in = 0;
     static char count_out = 0;
+    static char begin_count = 0;
 #endif
     if ( IS_BIT_CLR(g_u8SystemFlags, FLAG_100MS) )
         return;
 
     CLR_BIT(g_u8SystemFlags, FLAG_100MS);
+
+#if 0
+    if(begin_count>200)
+    {
+        test_vol_add = 200;
+    }
+    else {
+    begin_count++;
+    }
+#endif
 
 //    Just for timer stability ... PK 20240923+
 //    DL_GPIO_togglePins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_LED_GREEN_PIN);
@@ -973,11 +967,12 @@ void OneHundredMsHnadler(void){
 
 #else
     if( IS_BIT_CLR(g_u8SystemState, SYS_STAT_AC_OK) &&
-        StateDebounce((Average_AC_value < DC_OK_HIGH_THRESHOLD_2P946V && Average_AC_value > DC_OK_LOW_THRESHOLD_2P46V), 30, &g_u8ACOKCntr) &&
-        IS_BIT_SET(g_u8SystemState, SYS_STAT_BAT_IN)
+        StateDebounce((Average_AC_value < DC_OK_HIGH_THRESHOLD_2P946V && Average_AC_value > DC_OK_LOW_THRESHOLD_2P46V), 30, &g_u8ACOKCntr)
         ){
-    // AC OK...PK 20240919+
+
         g_u8ACNGCntr = 0;
+        g_u8SystemErrors = 0;
+
         SET_BIT(g_u8SystemState, SYS_STAT_AC_OK);
         CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_ENABLE);
         CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_INIT);
@@ -986,7 +981,8 @@ void OneHundredMsHnadler(void){
         if(IS_BIT_SET(g_u8SystemState, SYS_STAT_IDLE))
             CLR_BIT(g_u8SystemState, SYS_STAT_IDLE);
 
-        if(IS_BIT_CLR(g_u8SystemErrors, SYS_ERROR_OCP)){
+        //if(IS_BIT_CLR(g_u8SystemErrors, SYS_ERROR_OCP))
+        {
             //DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_DS_EN_PIN);
             DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
             delay_cycles(120000); // 0.05sec
@@ -996,14 +992,47 @@ void OneHundredMsHnadler(void){
 
             delay_cycles(1200000); // 0.05sec
         }
-//                __BKPT(0);
     }
-    else if(StateDebounce((Average_AC_value > DC_OK_HIGH_THRESHOLD_2P946V || Average_AC_value < DC_OK_LOW_THRESHOLD_2P46V), 10, &g_u8ACNGCntr)){
-    // AC NG...PK 20240919+
+    else if(IS_BIT_CLR(g_u8SystemErrors, SYS_ERROR_AC_NG) &&
+        (Average_AC_value > DC_OK_HIGH_THRESHOLD_2P946V || Average_AC_value < DC_OK_LOW_THRESHOLD_2P46V)){
+        if(g_u8ACNGCntr < 30)
+        {
+            g_u8ACNGCntr++;
+            return;
+        }
+
         g_u8ACOKCntr = 0;
+
+        bat_first_in = 0;
+        u8_bat_first_in = 0;
+        g_u8HIGHVALUECntr = 0;
+        g_u8SystemErrors = 0;
+        CLR_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
+        update_charge_current_by_VBAT();
+
+        disable_charger();
+
+        CLR_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
+        timeout[0] = 0;
+        timeout[1] = 0;
+        g_u8BatteryOVPCntr = 0;
+        g_u8BatteryOVPReleaseCntr = 0;
+        g_u8FastChargeCntr = 0;
+        g_u8FastChargeReleaseCntr = 0;
+        g_u8CapacityFullCntr = 0;
+        g_u8RechargeCntr = 0;
+        g_u8CHGOTPCntr = 0;
+        g_u8CHGOTPReleaseCntr = 0;
+        g_u8CHGUTPCntr = 0;
+        g_u8CHGUTPReleaseCntr = 0;
+        g_u8BatteryBATIMAXCntr = 0;
+        g_u8BatteryBATIMINCntr = 0;
+
         CLR_BIT(g_u8SystemState, SYS_STAT_AC_OK);
         CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_ENABLE);
         CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_INIT);
+        CLR_BIT(g_u8SystemFlags, FLAG_CAPACITY_FULL);
+        CLR_BIT(g_u8SystemFlags, FLAG_CHARGING);
         // For customer request ... 20241015+
         if(IS_BIT_SET(g_u8SystemFlags, FLAG_CAPACITY_FULL)){
             //CLR_BIT(g_u8SystemFlags, FLAG_CAPACITY_FULL);
@@ -1012,26 +1041,15 @@ void OneHundredMsHnadler(void){
 
         CLR_BIT(g_u8SystemFlags, FLAG_CAPACITY_FULL);
 
+        SET_BIT(g_u8SystemErrors, SYS_ERROR_AC_NG);
 
-
-        if(Average_AC_value > DC_OK_REMOVE_THRESHOLD_1P400V)
-            SET_BIT(g_u8SystemErrors, SYS_ERROR_AC_NG);
-
-        // disable_charger();
+        disable_charger();
         DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_CH_EN_PIN | BAMBOO_GPIO_ACOK_PIN);
 
         DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_VCH_PIN);
-#if 0
-        if(IS_BIT_SET(g_u8SystemState, SYS_STAT_CUTOFF) || IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_DCHG_OTP) ||
-           IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_OCP)){
-            //DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_DS_EN_PIN | BAMBOO_GPIO_BS_EN_PIN);
-        } else {
-            if(IS_BIT_CLR(g_u8SystemState, SYS_STAT_IDLE)){
-                //DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_DS_EN_PIN | BAMBOO_GPIO_BS_EN_PIN);
-            }
-        }
-#endif
-//            __BKPT(0);
+    }
+    else {
+        g_u8ACNGCntr = 0;
     }
     // if (IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_OCP)){
     //     CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_ENABLE);
@@ -1066,26 +1084,66 @@ void OneHundredMsHnadler(void){
     }
 
 #ifndef BAT_CHECK_IN_ORI
-    if((Average_TS_value > TS_AC_IN-30) && (Average_TS_value < TS_CHG_UTP_0_DEGREE+30))
+    if( IS_BIT_SET(g_u8SystemState, SYS_STAT_AC_OK))
     {
-        count_in = (count_in<30)?count_in+1:10;
-        count_out = 0;
-        if(count_in > 10)
+        if((Average_TS_value > TS_AC_IN-30) && (Average_TS_value < TS_CHG_UTP_0_DEGREE+30))
         {
-            SET_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
-
-            bat_in_temp_check = 0;
-
-            if(bat_first_in == 0)
+            count_in = (count_in<30)?count_in+1:10;
+            count_out = 0;
+            if(count_in > 10)
             {
-                func_I2C_RESET();
+                SET_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
 
-                charge_count[0] = 0;
-                charge_count[1] = 0;
+                bat_in_temp_check = 0;
 
+                if(bat_first_in == 0)
+                {
+                    func_I2C_RESET();
+
+                    charge_count[0] = 0;
+                    charge_count[1] = 0;
+
+                    timeout[0] = 0;
+                    timeout[1] = 0;
+
+                    g_u8BatteryOVPCntr = 0;
+                    g_u8BatteryOVPReleaseCntr = 0;
+                    g_u8FastChargeCntr = 0;
+                    g_u8FastChargeReleaseCntr = 0;
+                    g_u8CapacityFullCntr = 0;
+                    g_u8RechargeCntr = 0;
+                    g_u8CHGOTPCntr = 0;
+                    g_u8CHGOTPReleaseCntr = 0;
+                    g_u8CHGUTPCntr = 0;
+                    g_u8CHGUTPReleaseCntr = 0;
+
+                    bat_first_in = 1;
+                    u8_bat_first_in = 1;
+                    bat_in_count = 0;
+                    Enable_bat_mos();
+                }
+            }
+        }
+        else
+        {
+            count_in = 0;
+            count_out = (count_out<30)?count_out+1:10;
+            if(count_out > 5)
+            {
+                if(IS_BIT_SET(g_u8SystemState, SYS_STAT_BAT_IN))
+                {
+                    bat_first_in = 0;
+                    u8_bat_first_in = 0;
+                    g_u8HIGHVALUECntr = 0;
+                    g_u8SystemErrors = 0;
+                    CLR_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
+                    update_charge_current_by_VBAT();
+
+                    disable_charger();
+                }
+                CLR_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
                 timeout[0] = 0;
                 timeout[1] = 0;
-
                 g_u8BatteryOVPCntr = 0;
                 g_u8BatteryOVPReleaseCntr = 0;
                 g_u8FastChargeCntr = 0;
@@ -1096,60 +1154,20 @@ void OneHundredMsHnadler(void){
                 g_u8CHGOTPReleaseCntr = 0;
                 g_u8CHGUTPCntr = 0;
                 g_u8CHGUTPReleaseCntr = 0;
+                g_u8BatteryBATIMAXCntr = 0;
+                g_u8BatteryBATIMINCntr = 0;
 
-                bat_first_in = 1;
-                u8_bat_first_in = 1;
-                bat_in_count = 0;
-                Enable_bat_mos();
+                CLR_BIT(g_u8SystemState, SYS_STAT_AC_OK);
+                CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_ENABLE);
+                CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_INIT);
+                CLR_BIT(g_u8SystemFlags, FLAG_CAPACITY_FULL);
+                CLR_BIT(g_u8SystemFlags, FLAG_CHARGING);
+                // disable_charger();
+                DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_CH_EN_PIN | BAMBOO_GPIO_ACOK_PIN);
 
+                DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_VCH_PIN);
             }
         }
-
-    }
-    else
-    {
-        count_in = 0;
-        count_out = (count_out<30)?count_out+1:10;
-        if(count_out > 5)
-        {
-            if(IS_BIT_SET(g_u8SystemState, SYS_STAT_BAT_IN))
-            {
-                bat_first_in = 0;
-                u8_bat_first_in = 0;
-                g_u8HIGHVALUECntr = 0;
-                g_u8SystemErrors = 0;
-                CLR_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
-                update_charge_current_by_VBAT();
-
-                disable_charger();
-            }
-            CLR_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
-            timeout[0] = 0;
-            timeout[1] = 0;
-            g_u8BatteryOVPCntr = 0;
-            g_u8BatteryOVPReleaseCntr = 0;
-            g_u8FastChargeCntr = 0;
-            g_u8FastChargeReleaseCntr = 0;
-            g_u8CapacityFullCntr = 0;
-            g_u8RechargeCntr = 0;
-            g_u8CHGOTPCntr = 0;
-            g_u8CHGOTPReleaseCntr = 0;
-            g_u8CHGUTPCntr = 0;
-            g_u8CHGUTPReleaseCntr = 0;
-            g_u8BatteryBATIMAXCntr = 0;
-            g_u8BatteryBATIMINCntr = 0;
-
-            CLR_BIT(g_u8SystemState, SYS_STAT_AC_OK);
-            CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_ENABLE);
-            CLR_BIT(g_u8SystemState, SYS_STAT_CHARGER_INIT);
-            CLR_BIT(g_u8SystemFlags, FLAG_CAPACITY_FULL);
-            CLR_BIT(g_u8SystemFlags, FLAG_CHARGING);
-            // disable_charger();
-            DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_CH_EN_PIN | BAMBOO_GPIO_ACOK_PIN);
-
-            DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_VCH_PIN);
-        }
-
     }
 #endif
 
@@ -1159,7 +1177,7 @@ void OneHundredMsHnadler(void){
 
     if(g_u8SystemErrors)
     {
-        error_count = (error_count > 10)?error_count:error_count+1;
+        error_count = (error_count > 4)?error_count:(error_count+1);
 
     }
     else
@@ -1168,8 +1186,12 @@ void OneHundredMsHnadler(void){
         error_count = 0;
     }
 
-    if(g_u8SystemErrors && (error_count >= 10))
+    if(g_u8SystemErrors)
     {
+        if(error_count < 4)
+        {
+            return;
+        }
         if(record == 0)
         {
             addr_round = 0;
@@ -1222,9 +1244,7 @@ void OneHundredMsHnadler(void){
         DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_LED_GREEN_PIN);
 #endif
     }
-    else
-
-    if(IS_BIT_CLR(g_u8SystemState, SYS_STAT_BAT_IN))
+    else if(IS_BIT_CLR(g_u8SystemState, SYS_STAT_BAT_IN))
     {
         count_set = 0;
         first_chans = 0;
