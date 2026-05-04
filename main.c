@@ -44,6 +44,8 @@
 /* ==== ADC data ====*/
 #define RESULT_SIZE (5)
 
+//#define jump_fast
+
 volatile bool gCheckADC;
 volatile uint16_t gADC_PA27_A0_BAT[RESULT_SIZE];
 volatile uint16_t gADC_PA26_A1_IOUT[RESULT_SIZE];
@@ -125,7 +127,7 @@ char test_index = 0;
 char bat_in_temp_check = 0;
 uint8_t uart_rx = 0;
 uint8_t bat_in_count = 0;
-
+uint8_t start_time = 0;
 char u8_bat_first_in = 0;
 
 int main(void)
@@ -293,11 +295,40 @@ void disable_charger(void){
 
 void update_charge_current_by_VBAT(void)
 {
-    if(IS_BIT_SET(g_u8SystemState, SYS_STAT_FAST_CHARGE))
+    uint8_t count = 0;
+    //while(count < 10)
+    {
+#ifndef jump_fast
+        if(IS_BIT_SET(g_u8SystemState, SYS_STAT_FAST_CHARGE))
+            write_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT, CHARGE_CURRENT_2048mA);
+        else
+            write_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT, CHARGE_CURRENT_640mA);
+#else
         write_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT, CHARGE_CURRENT_2048mA);
-    else
-        write_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT, CHARGE_CURRENT_640mA);
-    delay_cycles(120000);
+#endif
+        delay_cycles(120000);
+        //read_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT);
+/*
+        if(IS_BIT_SET(g_u8SystemState, SYS_STAT_FAST_CHARGE))
+        {
+            if(gRxPacket[1] != 8)
+            {
+                continue;
+            }
+            else 
+            {
+                break;
+            }
+        }
+        else 
+        {
+            break;
+        }
+        count++;
+        */
+    }
+
+    
 }
 
 void Charger_init(void)
@@ -360,6 +391,9 @@ void Charger_control(void){
 
             // write_charge_reg(BQ24725A_REG_14H_RW_CHARGE_CURRENT, CHARGE_CURRENT_704mA);
             // delay_cycles(12000);
+#ifndef jump_fast
+            CLR_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
+#endif
             update_charge_current_by_VBAT();
 
             write_charge_reg(BQ24725A_REG_15H_RW_CHARGE_VOLTAGE, CHARGE_VOLTAGE_4096mV);
@@ -469,13 +503,13 @@ void system_status_check(void){
 
     // OCP
 #if 1
-    if(StateDebounce((Average_CS_value >= CS_OCP_0P09V_RELEASE), 3 ,&g_u8OCPCntr)){
+    if(StateDebounce((Average_IOUT_value >= CS_OCP_0P09V_RELEASE), 10,&g_u8OCPCntr)){
         SET_BIT(g_u8SystemErrors, SYS_ERROR_OCP);
         disable_charger();
         
 
 
-    } else if(IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_OCP) && StateDebounce((Average_CS_value < CS_OCP_0P09V_RELEASE), 3 ,&g_u8OCPReleaseCntr)){
+    } else if(IS_BIT_SET(g_u8SystemErrors, SYS_ERROR_OCP) && StateDebounce((Average_IOUT_value < CS_OCP_0P09V_RELEASE), 10 ,&g_u8OCPReleaseCntr)){
         //CLR_BIT(g_u8SystemErrors, SYS_ERROR_OCP);
         //CLR_BIT(g_u8SystemState, SYS_STAT_AC_OK);
 
@@ -589,17 +623,52 @@ void update_battery_capacity(void){
     }
 #endif
     // Fast charge or not
-    if(IS_BIT_SET(g_u8SystemFlags, FLAG_CHARGING)){
+#ifndef jump_fast
+    if(IS_BIT_SET(g_u8SystemFlags, FLAG_CHARGING) && IS_BIT_SET(g_u8SystemState, SYS_STAT_CHARGER_INIT)){
         if(StateDebounce((Average_BAT_value >= VBAT_SVP_0P300V_IN_FAST), 2 ,&g_u8FastChargeCntr) && IS_BIT_CLR(g_u8SystemState, SYS_STAT_FAST_CHARGE)){
             SET_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // fast charge
-            update_charge_current_by_VBAT();
+            //Charger_init();
+
+            func_I2C_RESET();
+            //DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_VCH_PIN);
+            //delay_cycles(24000000);
+            //DL_GPIO_initDigitalOutput(BAMBOO_GPIO_ACOK_IOMUX);
+
+            DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            delay_cycles(24000000);
+            //update_charge_current_by_VBAT();
+            //Charger_init();
+            //DL_GPIO_initDigitalInput(BAMBOO_GPIO_ACOK_IOMUX);
+            DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            delay_cycles(24000000);
+            Charger_init();
+            //DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            //update_charge_current_by_VBAT();
+            //Charger_init();
+            //Charger_init();
             g_u8FastChargeReleaseCntr = 0;
-        } else if(IS_BIT_SET(g_u8SystemState, SYS_STAT_FAST_CHARGE) && StateDebounce((Average_BAT_value < VBAT_SVP_0P300V_IN_FAST ), 2 ,&g_u8FastChargeReleaseCntr)){
+        } 
+        
+        else if(IS_BIT_SET(g_u8SystemState, SYS_STAT_FAST_CHARGE) && StateDebounce(((Average_BAT_value < VBAT_SVP_0P300V_IN_PRE)?1:0), 5 ,&g_u8FastChargeReleaseCntr)){
             CLR_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
-            update_charge_current_by_VBAT();
+            //Charger_init();
+            func_I2C_RESET();
+            //delay_cycles(24000000);
+            //DL_GPIO_initDigitalOutput(BAMBOO_GPIO_ACOK_IOMUX);
+            DL_GPIO_clearPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            delay_cycles(24000000);
+            //Charger_init();
+            //update_charge_current_by_VBAT();
+            DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            delay_cycles(24000000);
+            Charger_init();
+            //DL_GPIO_setPins(BAMBOO_GPIO_PORT, BAMBOO_GPIO_ACOK_PIN);
+            //update_charge_current_by_VBAT();
+            //Charger_init();
             g_u8FastChargeCntr = 0;
-        }  
+        }
     }
+#endif
 #if 0
     // Cutoff or not
     if(IS_BIT_CLR(g_u8SystemState, SYS_STAT_CUTOFF) && StateDebounce((Average_BAT_value < VBAT_CUTOFF_POINT_0P999V), 2 ,&g_u8CutoffCntr)){
@@ -651,6 +720,7 @@ void update_battery_capacity(void){
     }
 }
 uint32_t addr_start = 0x3f00;
+
 void fun_uart_test()
 {
     char rx_byte;
@@ -658,7 +728,8 @@ void fun_uart_test()
     char status[4] = {0};
     char result;
     char Chk_update_flash;
-
+    uint32_t tt[6];
+    uint32_t qq = tt[0];
     uint32_t newAppStackPointer;
     //DL_UART_transmitData(UART0, 'a');
     if(DL_UART_isRXFIFOEmpty(UART_0_INST) == 0)
@@ -969,7 +1040,9 @@ void OneHundredMsHnadler(void){
     if( IS_BIT_CLR(g_u8SystemState, SYS_STAT_AC_OK) &&
         StateDebounce((Average_AC_value < DC_OK_HIGH_THRESHOLD_2P946V && Average_AC_value > DC_OK_LOW_THRESHOLD_2P46V), 30, &g_u8ACOKCntr)
         ){
-
+#ifdef jump_fast
+        SET_BIT(g_u8SystemState, SYS_STAT_FAST_CHARGE); // pre charge
+#endif
         g_u8ACNGCntr = 0;
         g_u8SystemErrors = 0;
 
@@ -1094,11 +1167,12 @@ void OneHundredMsHnadler(void){
             {
                 SET_BIT(g_u8SystemState, SYS_STAT_BAT_IN);
 
+                start_time = 0;
                 bat_in_temp_check = 0;
-
+                func_I2C_RESET();
                 if(bat_first_in == 0)
                 {
-                    func_I2C_RESET();
+                    
 
                     charge_count[0] = 0;
                     charge_count[1] = 0;
@@ -1128,7 +1202,7 @@ void OneHundredMsHnadler(void){
         {
             count_in = 0;
             count_out = (count_out<30)?count_out+1:10;
-            if(count_out > 5)
+            if(count_out > 1)
             {
                 if(IS_BIT_SET(g_u8SystemState, SYS_STAT_BAT_IN))
                 {
@@ -1355,6 +1429,7 @@ void TIMER_0_INST_IRQHandler(void)
 
             timer_10ms_count++;
             light_syn++;
+            start_time++;
             SET_BIT(g_u8SystemFlags, FLAG_100MS);
 
             if(timer_10ms_count == TIMER_1_SEC_COUNTS){

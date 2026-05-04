@@ -15,7 +15,7 @@ typedef enum eCharger_BQ24725A_Lens
 uint8_t gTxPacket[BQ24725A_TX_WRITE_FRAME_LEN] = {0x00};
 
 /* Data received from Target */
-volatile uint8_t gRxPacket[BQ24725A_RX_READ_LEN];
+uint8_t gRxPacket[BQ24725A_RX_READ_LEN];
 
 /* I2C Target address */
 #define CHARGER_BQ24725A_I2C_8_BITS_ADDR (0x09)

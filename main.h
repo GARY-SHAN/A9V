@@ -31,6 +31,7 @@
 #define IOUT_TYPE_CURRENT_100mA      22 // 300mA (23 = 0.069v(0.0032*23) = I * 0.01 ohm * 20) => I = 345mA close to 200mA (small current have 10% ~ 20% tolerance)
 #define VBAT_FULL_CAPACITY_1P410V              253 //1.595v (divider) -> 4.1v (Original)
 #define VBAT_SVP_0P300V_IN_FAST    185 //0.999v (divider) -> 5v (Original)
+#define VBAT_SVP_0P300V_IN_PRE    180 //0.999v (divider) -> 5v (Original)
 #define VBAT_HIGH_CAPACITY          253
 #define VBAT_HIGH_CAPACITY_torlerance   235
 
@@ -52,7 +53,7 @@
 #define TS_AC_IN    186
 // OCP
 #define CS_OCP_0P09V                    217 // 1.8A = 0.09V (R=0.05 ohm)
-#define CS_OCP_0P09V_RELEASE            155 // 1.8A = 0.09V (R=0.05 ohm)
+#define CS_OCP_0P09V_RELEASE            200 // 1.8A = 0.09V (R=0.05 ohm)
 #define CS_SYSTEM_AWAY_0P06V            1 // 3.3v/1024 * 1(count) / 0.05 (R=0.05 ohm) = 0.06v
 
 #define FAST_TIMEOUT    25200
@@ -136,5 +137,7 @@ enum eSystemErrors
     SYS_ERROR_TIME              = MASK(6),
     SYS_ERROR_CHG_UTP           = MASK(7)
 };
+
+extern uint8_t gRxPacket[2];
 
 #endif
